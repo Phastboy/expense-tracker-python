@@ -27,7 +27,7 @@ def display_expenses_table(expenses: list[Expense]) -> None:
     # Add rows
     for expense in expenses:
         table.add_row(
-            str(expense.id), expense.date, expense.description, f"${expense.amount:.2f}"
+            str(expense.id), expense.date, expense.description, f"₦{expense.amount:.2f}"
         )
 
     console.print(table)
