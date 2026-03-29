@@ -1,6 +1,7 @@
 import json
 import os
-from decimal import Decimal
+from decimal import Decimal, InvalidOperation
+from typing import List, Optional, Dict, Any
 from features.models.expense import Expense
 from features.store.ports.expense_store import ExpenseStore
 
@@ -16,43 +17,79 @@ class JsonExpenseStore(ExpenseStore):
             with open(self.filepath, "w") as f:
                 json.dump([], f)
 
-    def get_all(self) -> list[Expense]:
-        """Reads the JSON file and reconstructs Expense objects."""
-        with open(self.filepath, "r") as f:
+    def _parse_expense(self, item: Dict[str, Any]) -> Optional[Expense]:
+        """Safely parse a single expense from JSON data."""
+        try:
+            # Validate required fields
+            if "description" not in item or "amount" not in item or "date" not in item:
+                return None
+
+            # Parse amount
             try:
-                data = json.load(f)
-            except json.JSONDecodeError:
+                amount = Decimal(str(item["amount"]))
+            except InvalidOperation, ValueError, TypeError:
+                return None
+
+            # Get ID (allow None for new records)
+            expense_id = item.get("id")
+            if expense_id is not None and not isinstance(expense_id, int):
+                return None
+
+            # Create expense with validation
+            expense = Expense(
+                id=expense_id,
+                description=str(item["description"]),
+                amount=amount,
+                date=str(item["date"]),
+            )
+            return expense
+        except ValueError, InvalidOperation:
+            # Skip corrupted records
+            return None
+
+    def get_all(self) -> List[Expense]:
+        """Reads the JSON file and reconstructs Expense objects."""
+        try:
+            with open(self.filepath, "r") as f:
+                try:
+                    data = json.load(f)
+                except json.JSONDecodeError:
+                    # Corrupted JSON file, return empty list
+                    return []
+
+            # Validate top-level structure
+            if not isinstance(data, list):
                 return []
 
-        expenses = []
-        for item in data:
-            # Reconstruct the Expense object.
-            expense = Expense(
-                id=item.get("id"),
-                description=item["description"],
-                amount=Decimal(str(item["amount"])),
-                date=item["date"],
-            )
-            expenses.append(expense)
+            # Parse each expense, skipping corrupted ones
+            expenses = []
+            for item in data:
+                if isinstance(item, dict):
+                    expense = self._parse_expense(item)
+                    if expense is not None:
+                        expenses.append(expense)
 
-        return expenses
+            return expenses
+        except IOError, OSError:
+            # File system errors
+            return []
+
+    def _get_next_id(self, expenses: List[Expense]) -> int:
+        """Calculate the next available ID safely."""
+        ids = [e.id for e in expenses if e.id is not None]
+        return max(ids) + 1 if ids else 1
 
     def save(self, expense: Expense) -> None:
         """Assigns an ID and saves the new expense to the file."""
         expenses = self.get_all()
 
-        # 1. The Storage Manager computes the ID
-        if not expenses:
-            expense.id = 1
-        else:
-            # Find the highest existing ID and add 1
-            highest_id = max(e.id for e in expenses if e.id is not None)
-            expense.id = highest_id + 1
+        # Assign ID
+        expense.id = self._get_next_id(expenses)
 
-        # 2. Add to our list
+        # Add to list
         expenses.append(expense)
 
-        # 3. Write everything back to disk
+        # Write everything back to disk
         self._save_all(expenses)
 
     def delete(self, expense_id: int) -> bool:
@@ -69,7 +106,7 @@ class JsonExpenseStore(ExpenseStore):
         self._save_all(filtered_expenses)
         return True
 
-    def _save_all(self, expenses: list[Expense]) -> None:
+    def _save_all(self, expenses: List[Expense]) -> None:
         """Helper method to serialize the objects back to JSON."""
         data = []
         for e in expenses:
@@ -77,9 +114,7 @@ class JsonExpenseStore(ExpenseStore):
                 {
                     "id": e.id,
                     "description": e.description,
-                    "amount": str(
-                        e.amount
-                    ),  # Convert Decimal to str for safe JSON storage
+                    "amount": str(e.amount),
                     "date": e.date,
                 }
             )
