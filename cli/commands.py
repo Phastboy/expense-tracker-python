@@ -33,7 +33,7 @@ def add(description: str, amount: str):
 
         expense = di.get_add_expense_use_case().execute(description, decimal_amount)
 
-        views.display_success(f"Added: {expense.description} for ${expense.amount:.2f}")
+        views.display_success(f"Added: {expense.description} for ₦{expense.amount:.2f}")
     except ValueError as e:
         views.display_error(str(e))
     except Exception as e:
