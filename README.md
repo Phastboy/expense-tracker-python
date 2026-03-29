@@ -1,0 +1,2 @@
+# moneygone
+expense tracker cli
